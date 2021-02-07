@@ -18,16 +18,20 @@
 
 package org.apache.flink.training.exercises.longrides;
 
+import org.apache.flink.api.common.state.ValueState;
+import org.apache.flink.api.common.state.ValueStateDescriptor;
+import org.apache.flink.api.common.typeinfo.TypeHint;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.TimerService;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.training.exercises.common.datatypes.TaxiRide;
-import org.apache.flink.training.exercises.common.sources.TaxiRideGenerator;
 import org.apache.flink.training.exercises.common.utils.ExerciseBase;
-import org.apache.flink.training.exercises.common.utils.MissingSolutionException;
 import org.apache.flink.util.Collector;
+
+import java.time.Instant;
 
 /**
  * The "Long Ride Alerts" exercise of the Flink training in the docs.
@@ -50,7 +54,7 @@ public class LongRidesExercise extends ExerciseBase {
 		env.setParallelism(ExerciseBase.parallelism);
 
 		// start the data generator
-		DataStream<TaxiRide> rides = env.addSource(rideSourceOrTest(new TaxiRideGenerator()));
+		DataStream<TaxiRide> rides = env.addSource(new TaxiFareListGenerator());
 
 		DataStream<TaxiRide> longRides = rides
 				.keyBy((TaxiRide ride) -> ride.rideId)
@@ -62,19 +66,33 @@ public class LongRidesExercise extends ExerciseBase {
 	}
 
 	public static class MatchFunction extends KeyedProcessFunction<Long, TaxiRide, TaxiRide> {
+		ValueState<TaxiRide> runningRide;
 
 		@Override
 		public void open(Configuration config) throws Exception {
-			throw new MissingSolutionException();
+			ValueStateDescriptor desc = new ValueStateDescriptor("StateTimer", TypeInformation.of(new TypeHint<Long>(){}));
+			runningRide = getRuntimeContext().getState(desc);
 		}
 
 		@Override
 		public void processElement(TaxiRide ride, Context context, Collector<TaxiRide> out) throws Exception {
 			TimerService timerService = context.timerService();
+			if (ride.isStart) {
+				if (runningRide != null) {
+					out.collect(runningRide.value());
+				}
+				runningRide.update(ride);
+				timerService.registerEventTimeTimer(ride.startTime.plusSeconds(60).toEpochMilli());
+			} else {
+				runningRide.update(null);
+				timerService.deleteEventTimeTimer(ride.startTime.plusSeconds(60).toEpochMilli());
+			}
+
 		}
 
 		@Override
 		public void onTimer(long timestamp, OnTimerContext context, Collector<TaxiRide> out) throws Exception {
+			out.collect(runningRide.value());
 		}
 	}
 }

@@ -57,10 +57,10 @@ public class HourlyTipsSolution extends ExerciseBase {
 		DataStream<Tuple3<Long, Long, Float>> hourlyTips = fares
 				.keyBy((TaxiFare fare) -> fare.driverId)
 				.window(TumblingEventTimeWindows.of(Time.hours(1)))
-				.process(new AddTips());
+				.process(new AddTips()); //buffer window 内所有元素，再一起计算
 
 		DataStream<Tuple3<Long, Long, Float>> hourlyMax = hourlyTips
-				.windowAll(TumblingEventTimeWindows.of(Time.hours(1)))
+				.windowAll(TumblingEventTimeWindows.of(Time.hours(1)))  //所有window的数据一起计算，所以不能并行
 				.maxBy(2);
 
 //		You should explore how this alternative behaves. In what ways is the same as,
