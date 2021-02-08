@@ -31,8 +31,6 @@ import org.apache.flink.training.exercises.common.datatypes.TaxiRide;
 import org.apache.flink.training.exercises.common.utils.ExerciseBase;
 import org.apache.flink.util.Collector;
 
-import java.time.Instant;
-
 /**
  * The "Long Ride Alerts" exercise of the Flink training in the docs.
  *
@@ -54,7 +52,7 @@ public class LongRidesExercise extends ExerciseBase {
 		env.setParallelism(ExerciseBase.parallelism);
 
 		// start the data generator
-		DataStream<TaxiRide> rides = env.addSource(new TaxiFareListGenerator());
+		DataStream<TaxiRide> rides = env.addSource(new TaxiRideListGenerator());
 
 		DataStream<TaxiRide> longRides = rides
 				.keyBy((TaxiRide ride) -> ride.rideId)
@@ -66,33 +64,45 @@ public class LongRidesExercise extends ExerciseBase {
 	}
 
 	public static class MatchFunction extends KeyedProcessFunction<Long, TaxiRide, TaxiRide> {
-		ValueState<TaxiRide> runningRide;
+		ValueState<Long> lastStartTime;
+		ValueState<TaxiRide> lastStartRide;
 
 		@Override
 		public void open(Configuration config) throws Exception {
 			ValueStateDescriptor desc = new ValueStateDescriptor("StateTimer", TypeInformation.of(new TypeHint<Long>(){}));
-			runningRide = getRuntimeContext().getState(desc);
+			lastStartTime = getRuntimeContext().getState(desc);
+
+			ValueStateDescriptor desc2 = new ValueStateDescriptor("StateRide", TypeInformation.of(new TypeHint<TaxiRide>(){}));
+			lastStartRide = getRuntimeContext().getState(desc2);
 		}
 
 		@Override
 		public void processElement(TaxiRide ride, Context context, Collector<TaxiRide> out) throws Exception {
-			TimerService timerService = context.timerService();
-			if (ride.isStart) {
-				if (runningRide != null) {
-					out.collect(runningRide.value());
-				}
-				runningRide.update(ride);
-				timerService.registerEventTimeTimer(ride.startTime.plusSeconds(60).toEpochMilli());
-			} else {
-				runningRide.update(null);
-				timerService.deleteEventTimeTimer(ride.startTime.plusSeconds(60).toEpochMilli());
-			}
+			try {
+				TimerService timerService = context.timerService();
+				if (ride.isStart) {
+					//调用ctx.emitWatermark设定watermark，如果watermark没有超过timeout时间，不会触发
+					lastStartTime.update(context.timestamp() + 1000);
+					System.out.println(context.timestamp());
+					timerService.registerEventTimeTimer(lastStartTime.value());
 
+					lastStartRide.update(ride);
+				} else {
+					System.out.println(lastStartTime.value());
+					timerService.deleteEventTimeTimer(lastStartTime.value());
+					lastStartRide.clear();
+					lastStartTime.clear();
+//					lastStartTime.update(null);
+//					lastStartRide.update(null);
+				}
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
 		}
 
 		@Override
 		public void onTimer(long timestamp, OnTimerContext context, Collector<TaxiRide> out) throws Exception {
-			out.collect(runningRide.value());
+			out.collect(lastStartRide.value());
 		}
 	}
 }

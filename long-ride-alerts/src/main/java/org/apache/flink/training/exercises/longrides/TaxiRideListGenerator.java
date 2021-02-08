@@ -4,10 +4,10 @@ import org.apache.flink.shaded.curator4.com.google.common.collect.Lists;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.training.exercises.common.datatypes.TaxiRide;
-import org.apache.flink.training.exercises.common.datatypes.TaxiRide;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 public class TaxiRideListGenerator implements SourceFunction<TaxiRide> {
 
@@ -16,22 +16,23 @@ public class TaxiRideListGenerator implements SourceFunction<TaxiRide> {
 	@Override
 	public void run(SourceContext<TaxiRide> ctx) throws Exception {
 
+		long baseTime = Instant.now().minusSeconds(3600 * 24).toEpochMilli();
 		long id = 1;
 
 		List<TaxiRide> list = Lists.newArrayList(
-				new TaxiRide(1, true, Instant.now(), Instant.now(), 0f, 1.1f, 0f, 0f, (short) 0, 1, 1),
-				new TaxiRide(1, false, Instant.now(), Instant.now(), 0f, 1.2f, 0f, 0f, (short) 0, 1, 1),
-				new TaxiRide(2, true, Instant.now(), Instant.now(), 0f, 1.7f, 0f, 0f, (short) 0, 2, 2),
-				new TaxiRide(2, false, Instant.now(), Instant.now(), 0f, 3.4f, 0f, 0f, (short) 0, 2, 2),
-				new TaxiRide(3, true, Instant.now(), Instant.now(), 0f, 1.4f, 0f, 0f, (short) 0, 3, 3),
-				new TaxiRide(3, false, Instant.now(), Instant.now(), 0f, 0.5f, 0f, 0f, (short) 0, 3,3),
+				new TaxiRide(1, true, Instant.ofEpochMilli(baseTime), null, 1)
+
+				//下面这条的startTime会导致上面这一条timeout
+				,new TaxiRide(2, true, Instant.ofEpochMilli(baseTime + 2000), null, 2)
+				,new TaxiRide(1, false, null, Instant.ofEpochMilli(baseTime + 1000), 1)
+				,new TaxiRide(2, false, null, Instant.ofEpochMilli(baseTime + 3000), 2)
 				
 		);
 
 		for (TaxiRide ride : list) {
 			ctx.collectWithTimestamp(ride, ride.getEventTime());
 			ctx.emitWatermark(new Watermark(ride.getEventTime()));
-			Thread.sleep(100);
+			Thread.sleep(1000);
 		}
 	}
 
